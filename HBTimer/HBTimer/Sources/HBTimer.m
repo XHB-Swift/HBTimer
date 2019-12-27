@@ -13,10 +13,8 @@
 @property (nonatomic, strong) NSMutableArray<dispatch_source_t> *timerPool;
 @property (nonatomic, strong) NSMutableArray<dispatch_source_t> *timeoutTimerPool;
 @property (nonatomic, strong) dispatch_queue_t queue;
-@property (nonatomic, weak) NSProcessInfo *processInfo;
 @property (nonatomic, weak) id target;
 @property (nonatomic) SEL action;
-@property (nonatomic) NSTimeInterval beginTiming;
 
 @end
 
@@ -37,7 +35,6 @@
 - (instancetype)initWithTarget:(id)target timeoutAction:(SEL)action inQueue:(dispatch_queue_t _Nullable)queue {
     
     if (self = [super init]) {
-        _processInfo = [NSProcessInfo processInfo];
         _target = target;
         _action = action;
         _start = DISPATCH_TIME_NOW;
@@ -77,24 +74,23 @@
     @synchronized (self) {
         dispatch_source_t timer = dispatch_source_create(DISPATCH_SOURCE_TYPE_TIMER, 0, 0, self.queue);
         dispatch_source_set_timer(timer, self.start, [self timerInterval], self.accuracy);
+        //先启动再设置回调，解决先设置回调再启动计时器会立即触发回调的bug
+        dispatch_resume(timer);
+        __weak typeof(self) weakSelf = self;
         dispatch_source_set_event_handler(timer, ^{
+            __strong typeof(weakSelf) strongSelf = weakSelf;
             dispatch_async(dispatch_get_main_queue(), ^{
-                NSTimeInterval delta = ([self.processInfo systemUptime] - self.beginTiming) * self.unit;
-                if (delta >= self.duration) {
-                    if (timer && ![self.timeoutTimerPool containsObject:timer]) {
-                        [self.timeoutTimerPool addObject:timer];
-                        [self stopTimer];
-                        if (self.target && [self.target respondsToSelector:self.action]) {
-                            IMP actionIMP = [self.target methodForSelector:self.action];
-                            void(*actionFunc)(id, SEL, HBTimer *) = (void *)actionIMP;
-                            actionFunc(self.target, self.action, self);
-                        }
+                if (timer && ![strongSelf.timeoutTimerPool containsObject:timer]) {
+                    [strongSelf.timeoutTimerPool addObject:timer];
+                    [strongSelf stopTimer];
+                    if (strongSelf.target && [strongSelf.target respondsToSelector:strongSelf.action]) {
+                        IMP actionIMP = [self.target methodForSelector:strongSelf.action];
+                        void(*actionFunc)(id, SEL, HBTimer *) = (void *)actionIMP;
+                        actionFunc(strongSelf.target, strongSelf.action, strongSelf);
                     }
                 }
             });
         });
-        dispatch_resume(timer);
-        self.beginTiming = [self.processInfo systemUptime];
         [self.timerPool addObject:timer];
     }
 }

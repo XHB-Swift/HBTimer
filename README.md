@@ -20,7 +20,7 @@ timer.accuracy = 3; //计时器精度
 ``` Objective-C
 [timer startTimer];
 ```
-超时回调
+超时回调，自定义方法处理超时回调
 ``` Objective-C
 - (void)timerDidTimeout {
 
